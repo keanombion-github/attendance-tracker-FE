@@ -21,6 +21,11 @@ export default function AdminPanel() {
   const [employees, setEmployees] = useState<EmployeeData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  const handleLogout = () => {
+    logout();
+    router.push('/login');
+  };
+
   useEffect(() => {
     if (user && user.role !== 'admin') {
       router.push('/dashboard');
@@ -78,7 +83,7 @@ export default function AdminPanel() {
               <div className="text-sm text-gray-300">
                 Admin: <span className="text-white font-medium">{user?.email}</span>
               </div>
-              <Button variant="secondary" size="sm" onClick={logout}>
+              <Button variant="secondary" size="sm" onClick={handleLogout}>
                 Logout
               </Button>
             </div>

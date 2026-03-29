@@ -1,25 +1,112 @@
 'use client';
 
 import { useAuth } from '@/lib/auth';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/Button';
 import Link from 'next/link';
 
+interface UserDetails {
+  id: string;
+  email: string;
+  name?: string;
+  role: 'employee' | 'admin';
+  isClocked?: boolean;
+  clockInTime?: string;
+  todayHours?: string;
+}
+
 export default function Dashboard() {
-  const { user, logout } = useAuth();
+  const { user, logout, isLoading, fetchUserDetails } = useAuth();
+  const router = useRouter();
   const [isClockingIn, setIsClockingIn] = useState(false);
   const [isClockingOut, setIsClockingOut] = useState(false);
-  const [clockedIn, setClockedIn] = useState(false);
+  const [userDetails, setUserDetails] = useState<UserDetails | null>(null);
+  const [currentTime, setCurrentTime] = useState<Date | null>(null);
+  // const [isLoading, setIsLoading] = useState(true);
+
+  // Fix hydration by only setting time on client
+  useEffect(() => {
+    setCurrentTime(new Date());
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleFetchUserDetails = async () => {
+    try {
+      const success = await fetchUserDetails();
+      console.log('Dashboard - fetchUserDetails success:', success, user);
+    } catch (error) {
+      console.error('Error fetching user details:', error);
+    } finally {
+      // setIsLoading(false);
+    }
+  };
+
+  const handleTodaysRecord = () => {
+    if (!user || !user.records) return null;
+    const today = new Date().toDateString();
+    const todaysRecord = user.records.find(record => {
+      const recordDate = new Date(record.timein).toDateString();
+      return recordDate === today;
+    });
+
+    console.log('Dashboard - Today\'s record:', todaysRecord);
+    
+    // if(todaysRecord?.timein) {
+    //   setIsClockingIn(true)
+    // } else {
+    //   setIsClockingIn(false)
+    // }
+    
+    // if(todaysRecord?.timeout) {
+    //   setIsClockingOut(true)
+    // } else {
+    //   setIsClockingOut(false)
+    // }
+
+  }
+
+  useEffect(() => {
+    if (!isLoading && user) {
+      handleFetchUserDetails();
+      handleTodaysRecord();
+    }
+  }, [isLoading]);
+
+  const handleLogout = () => {
+    logout();
+    router.push('/login');
+  };
 
   const handleClockIn = async () => {
     setIsClockingIn(true);
     try {
-      await fetch('/api/attendance/clock-in', {
+      const token = localStorage.getItem('auth-token');
+      console.log('Frontend - Sending clock-in request with token:', token);
+      const parsedToken = token ? JSON.parse(token) : null;
+
+      const response = await fetch('/api/attendance/clock-in', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+            'Authorization': `Bearer ${parsedToken.token}`,
+        },
         body: JSON.stringify({ employeeId: user?.id }),
       });
-      setClockedIn(true);
+      
+      console.log('Frontend - Clock-in response status:', response.status);
+      const data = await response.json();
+      console.log('Frontend - Clock-in response data:', data);
+      
+      if (response.ok) {
+        // Refresh user details to get updated clock status
+        await fetchUserDetails();
+      } else {
+        console.error('Clock-in failed:', data);
+      }
     } catch (error) {
       console.error('Clock in error:', error);
     }
@@ -29,17 +116,36 @@ export default function Dashboard() {
   const handleClockOut = async () => {
     setIsClockingOut(true);
     try {
-      await fetch('/api/attendance/clock-out', {
+      const token = localStorage.getItem('auth-token');
+      console.log('Frontend - Sending clock-out request with token:', token);
+      
+      const response = await fetch('/api/attendance/clock-out', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
         body: JSON.stringify({ employeeId: user?.id }),
       });
-      setClockedIn(false);
+      
+      console.log('Frontend - Clock-out response status:', response.status);
+      const data = await response.json();
+      console.log('Frontend - Clock-out response data:', data);
+      
+      if (response.ok) {
+        // Refresh user details to get updated clock status
+        await fetchUserDetails();
+      } else {
+        console.error('Clock-out failed:', data);
+      }
     } catch (error) {
       console.error('Clock out error:', error);
     }
     setIsClockingOut(false);
   };
+
+  // Get clock status from userDetails
+  const isClocked = userDetails?.isClocked || false;
 
   return (
     <div className="min-h-screen bg-gray-900">
@@ -61,9 +167,14 @@ export default function Dashboard() {
                 </Link>
               )}
               <div className="text-sm text-gray-300">
-                Welcome, <span className="text-white font-medium">{user?.name || user?.email}</span>
+                Welcome, <span className="text-white font-medium">{userDetails?.name || user?.name || user?.email}</span>
+                {currentTime && (
+                  <div className="text-xs text-gray-400 mt-1">
+                    {currentTime.toLocaleDateString()} {currentTime.toLocaleTimeString()}
+                  </div>
+                )}
               </div>
-              <Button variant="secondary" size="sm" onClick={logout}>
+              <Button variant="secondary" size="sm" onClick={handleLogout}>
                 Logout
               </Button>
             </div>
@@ -77,22 +188,42 @@ export default function Dashboard() {
           <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-white">Current Status</h2>
-              <div className={`h-3 w-3 rounded-full ${clockedIn ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              <div className={`h-3 w-3 rounded-full ${isClocked ? 'bg-green-500' : 'bg-red-500'}`}></div>
             </div>
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">Status:</span>
-                <span className={`font-medium ${clockedIn ? 'text-green-400' : 'text-red-400'}`}>
-                  {clockedIn ? 'Clocked In' : 'Clocked Out'}
+                <span className={`font-medium ${isClocked ? 'text-green-400' : 'text-red-400'}`}>
+                  {isClocked ? 'Clocked In' : 'Clocked Out'}
                 </span>
+              </div>
+              {userDetails?.clockInTime && (
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400">Clock In Time:</span>
+                  <span className="font-medium text-white">{userDetails.clockInTime}</span>
+                </div>
+              )}
+              <div className='justify-between items-center'>
+                <span className="text-gray-400 font-bold">Records:</span>
+                <div className='grid grid-cols-1 gap-2'>
+                    {user?.records?.map((record, index) => (
+                    <div key={index} className="items-center space-x-2">
+                      <span className="font-medium text-gray-400">{new Date(record.timein).toLocaleDateString()}</span>
+                      <div className='flex items-center space-x-4'>
+                        {record.timein && (
+                          <span className="font-medium text-white"><b className='text-green-400'>In:</b> {new Date(record.timein).toLocaleTimeString()}</span>
+                        )}
+                        {record.timeout && (
+                          <span className="font-medium text-white"><b className='text-red-400'>Out:</b> {new Date(record.timeout).toLocaleTimeString()}</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">Today's Hours:</span>
-                <span className="font-medium text-white">0:00</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-400">This Week:</span>
-                <span className="font-medium text-white">0:00</span>
+                <span className="font-medium text-white">{userDetails?.todayHours || '0:00'}</span>
               </div>
             </div>
           </div>
@@ -105,7 +236,7 @@ export default function Dashboard() {
                 variant="success"
                 className="w-full py-4 text-lg"
                 onClick={handleClockIn}
-                disabled={clockedIn || isClockingIn}
+                disabled={isClocked || isClockingIn}
               >
                 {isClockingIn ? (
                   <div className="flex items-center justify-center space-x-2">
@@ -120,7 +251,7 @@ export default function Dashboard() {
                 variant="danger"
                 className="w-full py-4 text-lg"
                 onClick={handleClockOut}
-                disabled={!clockedIn || isClockingOut}
+                disabled={!isClocked || isClockingOut}
               >
                 {isClockingOut ? (
                   <div className="flex items-center justify-center space-x-2">
